@@ -1,0 +1,467 @@
+import React, { useState, useEffect, useCallback, useRef } from ‘react’;
+import { Camera, Zap, Clock, DoorClosed, DoorOpen, Lightbulb } from ‘lucide-react’;
+
+// Game Configuration
+const CONFIG = {
+hourDuration: 60000,
+startingPower: 100,
+basePowerDrain: 0.05,
+cameraPowerDrain: 0.15,
+doorPowerDrain: 0.12,
+lightPowerCost: 3,
+enemyBaseSpeed: 30000,
+aggressionMultiplier: 0.75,
+cameraSlowEffect: 0.3
+};
+
+// Room layout and connections
+const ROOMS = [
+{ id: ‘start’, name: ‘Storage Room’, distance: 5 },
+{ id: ‘hall1’, name: ‘East Corridor’, distance: 4 },
+{ id: ‘hall2’, name: ‘Main Hallway’, distance: 3 },
+{ id: ‘junction’, name: ‘Junction’, distance: 2 },
+{ id: ‘leftHall’, name: ‘Left Hallway’, distance: 1 },
+{ id: ‘rightHall’, name: ‘Right Hallway’, distance: 1 }
+];
+
+const FiveNightsAtRods = () => {
+// Core game state
+const [gameState, setGameState] = useState(‘menu’); // menu, playing, victory, gameover
+const [time, setTime] = useState(0); // 0-5 represents 12AM-6AM
+const [power, setPower] = useState(CONFIG.startingPower);
+const [enemyPosition, setEnemyPosition] = useState(‘start’);
+const [leftDoorClosed, setLeftDoorClosed] = useState(false);
+const [rightDoorClosed, setRightDoorClosed] = useState(false);
+const [cameraOpen, setCameraOpen] = useState(false);
+const [selectedCamera, setSelectedCamera] = useState(‘start’);
+const [lightOn, setLightOn] = useState(false);
+const [enemyAtDoor, setEnemyAtDoor] = useState(null); // ‘left’, ‘right’, or null
+
+// Refs for continuous updates
+const timeRef = useRef(0);
+const powerRef = useRef(CONFIG.startingPower);
+const enemyRef = useRef(‘start’);
+const lastMoveTime = useRef(Date.now());
+const animationFrameRef = useRef(null);
+const gameStartTime = useRef(null);
+
+// Start new game
+const startGame = useCallback(() => {
+setGameState(‘playing’);
+setTime(0);
+setPower(CONFIG.startingPower);
+setEnemyPosition(‘start’);
+setLeftDoorClosed(false);
+setRightDoorClosed(false);
+setCameraOpen(false);
+setSelectedCamera(‘start’);
+setLightOn(false);
+setEnemyAtDoor(null);
+timeRef.current = 0;
+powerRef.current = CONFIG.startingPower;
+enemyRef.current = ‘start’;
+gameStartTime.current = Date.now();
+lastMoveTime.current = Date.now();
+}, []);
+
+// Game loop
+useEffect(() => {
+if (gameState !== ‘playing’) return;
+
+```
+const gameLoop = () => {
+  const now = Date.now();
+  const elapsed = now - gameStartTime.current;
+  
+  // Update time
+  const newTime = Math.min(6, elapsed / CONFIG.hourDuration);
+  timeRef.current = newTime;
+  setTime(newTime);
+
+  // Check victory
+  if (newTime >= 6) {
+    setGameState('victory');
+    return;
+  }
+
+  // Update power
+  let powerDrain = CONFIG.basePowerDrain / 60; // Per frame at 60fps
+  if (cameraOpen) powerDrain += CONFIG.cameraPowerDrain / 60;
+  if (leftDoorClosed) powerDrain += CONFIG.doorPowerDrain / 60;
+  if (rightDoorClosed) powerDrain += CONFIG.doorPowerDrain / 60;
+
+  const newPower = Math.max(0, powerRef.current - powerDrain);
+  powerRef.current = newPower;
+  setPower(newPower);
+
+  // Power outage - open all doors
+  if (newPower <= 0) {
+    setLeftDoorClosed(false);
+    setRightDoorClosed(false);
+    setCameraOpen(false);
+  }
+
+  // Enemy AI
+  const currentHour = Math.floor(newTime);
+  const moveDelay = CONFIG.enemyBaseSpeed * Math.pow(CONFIG.aggressionMultiplier, currentHour);
+  const isBeingWatched = cameraOpen && selectedCamera === enemyRef.current;
+  const effectiveDelay = isBeingWatched ? moveDelay / CONFIG.cameraSlowEffect : moveDelay;
+
+  if (now - lastMoveTime.current > effectiveDelay) {
+    moveEnemy();
+    lastMoveTime.current = now;
+  }
+
+  // Check for attack
+  if (enemyAtDoor === 'left' && !leftDoorClosed && newPower > 0) {
+    setGameState('gameover');
+    return;
+  }
+  if (enemyAtDoor === 'right' && !rightDoorClosed && newPower > 0) {
+    setGameState('gameover');
+    return;
+  }
+
+  // Random attack during power outage
+  if (newPower <= 0 && (enemyAtDoor === 'left' || enemyAtDoor === 'right') && Math.random() < 0.02) {
+    setGameState('gameover');
+    return;
+  }
+
+  animationFrameRef.current = requestAnimationFrame(gameLoop);
+};
+
+animationFrameRef.current = requestAnimationFrame(gameLoop);
+
+return () => {
+  if (animationFrameRef.current) {
+    cancelAnimationFrame(animationFrameRef.current);
+  }
+};
+```
+
+}, [gameState, cameraOpen, selectedCamera, leftDoorClosed, rightDoorClosed, enemyAtDoor]);
+
+// Enemy movement logic
+const moveEnemy = useCallback(() => {
+const currentPos = enemyRef.current;
+const currentIndex = ROOMS.findIndex(r => r.id === currentPos);
+
+```
+// Enemy is at a door
+if (currentPos === 'leftHall') {
+  setEnemyAtDoor('left');
+  return;
+}
+if (currentPos === 'rightHall') {
+  setEnemyAtDoor('right');
+  return;
+}
+
+// Move forward if not at door
+if (currentIndex < ROOMS.length - 2) {
+  if (currentIndex < ROOMS.length - 3) {
+    // Before junction - move forward
+    const nextPos = ROOMS[currentIndex + 1].id;
+    enemyRef.current = nextPos;
+    setEnemyPosition(nextPos);
+  } else if (currentPos === 'junction') {
+    // At junction - choose left or right
+    const choice = Math.random() < 0.5 ? 'leftHall' : 'rightHall';
+    enemyRef.current = choice;
+    setEnemyPosition(choice);
+  }
+}
+
+// Small chance to move back
+if (Math.random() < 0.2 && currentIndex > 0) {
+  const prevPos = ROOMS[currentIndex - 1].id;
+  enemyRef.current = prevPos;
+  setEnemyPosition(prevPos);
+  setEnemyAtDoor(null);
+}
+```
+
+}, []);
+
+// Keyboard controls
+useEffect(() => {
+if (gameState !== ‘playing’) return;
+
+```
+const handleKeyDown = (e) => {
+  if (power <= 0) return;
+
+  switch(e.key.toLowerCase()) {
+    case 'c':
+    case ' ':
+      setCameraOpen(prev => !prev);
+      break;
+    case 'a':
+    case 'arrowleft':
+      setLeftDoorClosed(prev => !prev);
+      break;
+    case 'd':
+    case 'arrowright':
+      setRightDoorClosed(prev => !prev);
+      break;
+    case 'w':
+    case 'arrowup':
+      if (!lightOn) {
+        setLightOn(true);
+        setPower(prev => Math.max(0, prev - CONFIG.lightPowerCost));
+        setTimeout(() => setLightOn(false), 500);
+      }
+      break;
+  }
+};
+
+window.addEventListener('keydown', handleKeyDown);
+return () => window.removeEventListener('keydown', handleKeyDown);
+```
+
+}, [gameState, power, lightOn]);
+
+// Get time display
+const getTimeDisplay = () => {
+const hour = Math.floor(time);
+if (hour === 0) return ‘12 AM’;
+if (hour === 6) return ‘6 AM’;
+return `${hour} AM`;
+};
+
+// Get power color
+const getPowerColor = () => {
+if (power > 75) return ‘text-green-400’;
+if (power > 50) return ‘text-yellow-400’;
+if (power > 25) return ‘text-orange-400’;
+return ‘text-red-400’;
+};
+
+// Render functions
+const renderMenu = () => (
+<div className="flex flex-col items-center justify-center h-full bg-gray-900 text-white">
+<h1 className="text-6xl font-bold mb-4 text-red-500">5 NIGHTS AT RODS</h1>
+<p className="text-xl mb-8 text-gray-400">Can you survive until 6 AM?</p>
+<button
+onClick={startGame}
+className="px-8 py-4 bg-red-600 hover:bg-red-700 text-2xl rounded-lg transition-colors"
+>
+START GAME
+</button>
+<div className="mt-12 max-w-2xl text-left text-sm text-gray-400 space-y-2">
+<p><strong>Controls:</strong></p>
+<p>SPACE/C - Toggle Cameras | A/← - Left Door | D/→ - Right Door | W/↑ - Window Light</p>
+<p><strong>Objective:</strong> Survive from 12 AM to 6 AM by monitoring cameras and managing power.</p>
+<p><strong>Warning:</strong> Rod is hunting you. Keep him away from your office doors.</p>
+</div>
+</div>
+);
+
+const renderVictory = () => (
+<div className="flex flex-col items-center justify-center h-full bg-gray-900 text-white">
+<h1 className="text-6xl font-bold mb-4 text-green-400">YOU SURVIVED!</h1>
+<p className="text-2xl mb-4">6 AM - Your shift is over</p>
+<p className="text-xl mb-8 text-gray-400">Power remaining: {power.toFixed(1)}%</p>
+<button
+onClick={startGame}
+className="px-8 py-4 bg-green-600 hover:bg-green-700 text-2xl rounded-lg transition-colors"
+>
+PLAY AGAIN
+</button>
+</div>
+);
+
+const renderGameOver = () => (
+<div className="flex flex-col items-center justify-center h-full bg-black text-white">
+<div className="mb-8 text-9xl">😈</div>
+<h1 className="text-6xl font-bold mb-4 text-red-500">GAME OVER</h1>
+<p className="text-2xl mb-8">Time survived: {getTimeDisplay()}</p>
+<button
+onClick={startGame}
+className="px-8 py-4 bg-red-600 hover:bg-red-700 text-2xl rounded-lg transition-colors"
+>
+TRY AGAIN
+</button>
+</div>
+);
+
+const renderCameraView = () => (
+<div className="absolute inset-0 bg-black bg-opacity-95 z-50 flex flex-col p-4">
+<div className="flex justify-between items-center mb-4">
+<h2 className="text-2xl font-bold text-green-400">SURVEILLANCE CAMERAS</h2>
+<button
+onClick={() => setCameraOpen(false)}
+className=“px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded”
+>
+CLOSE [C]
+</button>
+</div>
+
+```
+  <div className="grid grid-cols-3 gap-4 flex-1">
+    {ROOMS.map(room => (
+      <button
+        key={room.id}
+        onClick={() => setSelectedCamera(room.id)}
+        className={`p-4 rounded-lg border-2 transition-all ${
+          selectedCamera === room.id
+            ? 'border-green-400 bg-gray-800'
+            : 'border-gray-600 bg-gray-900 hover:border-gray-500'
+        }`}
+      >
+        <div className="text-lg font-bold mb-2">{room.name}</div>
+        <div className="text-sm text-gray-400">Distance: {room.distance}</div>
+        {enemyPosition === room.id && (
+          <div className="mt-2 text-red-500 font-bold text-xl animate-pulse">
+            ⚠️ ROD DETECTED
+          </div>
+        )}
+      </button>
+    ))}
+  </div>
+
+  {selectedCamera && (
+    <div className="mt-4 p-4 bg-gray-800 rounded-lg">
+      <div className="text-xl font-bold mb-2">
+        {ROOMS.find(r => r.id === selectedCamera)?.name}
+      </div>
+      <div className="h-64 bg-gray-900 rounded flex items-center justify-center relative overflow-hidden">
+        {enemyPosition === selectedCamera ? (
+          <div className="text-8xl animate-pulse">😈</div>
+        ) : (
+          <div className="text-gray-600 text-xl">No movement detected</div>
+        )}
+        <div className="absolute bottom-2 right-2 text-green-400 text-sm animate-pulse">
+          ● REC
+        </div>
+      </div>
+    </div>
+  )}
+</div>
+```
+
+);
+
+const renderOfficeView = () => (
+<div className="relative h-full bg-gray-800 flex flex-col">
+{/* HUD */}
+<div className="flex justify-between items-center p-4 bg-gray-900 border-b border-gray-700">
+<div className="flex items-center gap-4">
+<Clock className="w-6 h-6" />
+<span className="text-3xl font-bold">{getTimeDisplay()}</span>
+</div>
+
+```
+    <div className={`flex items-center gap-4 text-2xl font-bold ${getPowerColor()}`}>
+      <Zap className="w-6 h-6" />
+      <span>{power.toFixed(1)}%</span>
+    </div>
+  </div>
+
+  {/* Office View */}
+  <div className="flex-1 flex items-center justify-center relative">
+    {/* Left Door */}
+    <div className="absolute left-8 top-1/2 -translate-y-1/2">
+      <button
+        onClick={() => power > 0 && setLeftDoorClosed(!leftDoorClosed)}
+        disabled={power <= 0}
+        className={`p-4 rounded-lg ${
+          leftDoorClosed
+            ? 'bg-red-600 hover:bg-red-700'
+            : 'bg-green-600 hover:bg-green-700'
+        } transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+      >
+        {leftDoorClosed ? <DoorClosed className="w-8 h-8" /> : <DoorOpen className="w-8 h-8" />}
+        <div className="text-xs mt-2">LEFT [A]</div>
+      </button>
+      {enemyAtDoor === 'left' && lightOn && (
+        <div className="absolute top-0 left-full ml-4 text-6xl animate-pulse">😈</div>
+      )}
+    </div>
+
+    {/* Right Door */}
+    <div className="absolute right-8 top-1/2 -translate-y-1/2">
+      <button
+        onClick={() => power > 0 && setRightDoorClosed(!rightDoorClosed)}
+        disabled={power <= 0}
+        className={`p-4 rounded-lg ${
+          rightDoorClosed
+            ? 'bg-red-600 hover:bg-red-700'
+            : 'bg-green-600 hover:bg-green-700'
+        } transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+      >
+        {rightDoorClosed ? <DoorClosed className="w-8 h-8" /> : <DoorOpen className="w-8 h-8" />}
+        <div className="text-xs mt-2">RIGHT [D]</div>
+      </button>
+      {enemyAtDoor === 'right' && lightOn && (
+        <div className="absolute top-0 right-full mr-4 text-6xl animate-pulse">😈</div>
+      )}
+    </div>
+
+    {/* Window Light */}
+    <div className="absolute bottom-8">
+      <button
+        onClick={() => {
+          if (power > 0 && !lightOn) {
+            setLightOn(true);
+            setPower(prev => Math.max(0, prev - CONFIG.lightPowerCost));
+            setTimeout(() => setLightOn(false), 500);
+          }
+        }}
+        disabled={power <= 0 || lightOn}
+        className={`p-4 rounded-lg ${
+          lightOn ? 'bg-yellow-400' : 'bg-gray-700 hover:bg-gray-600'
+        } transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+      >
+        <Lightbulb className="w-8 h-8" />
+        <div className="text-xs mt-2">LIGHT [W]</div>
+      </button>
+    </div>
+
+    {/* Office desk representation */}
+    <div className="text-center">
+      <div className="text-6xl mb-4">🖥️</div>
+      <div className="text-gray-400">Your Office</div>
+      {power <= 0 && (
+        <div className="mt-4 text-red-500 text-xl font-bold animate-pulse">
+          POWER OUT!
+        </div>
+      )}
+    </div>
+  </div>
+
+  {/* Bottom Controls */}
+  <div className="p-4 bg-gray-900 border-t border-gray-700 flex justify-center">
+    <button
+      onClick={() => power > 0 && setCameraOpen(!cameraOpen)}
+      disabled={power <= 0}
+      className={`px-6 py-3 rounded-lg flex items-center gap-2 ${
+        cameraOpen
+          ? 'bg-blue-600 hover:bg-blue-700'
+          : 'bg-gray-700 hover:bg-gray-600'
+      } transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+    >
+      <Camera className="w-6 h-6" />
+      <span className="text-lg">{cameraOpen ? 'CLOSE' : 'OPEN'} CAMERAS [C]</span>
+    </button>
+  </div>
+
+  {/* Camera Overlay */}
+  {cameraOpen && renderCameraView()}
+</div>
+```
+
+);
+
+return (
+<div className="w-full h-screen bg-gray-900 text-white overflow-hidden">
+{gameState === ‘menu’ && renderMenu()}
+{gameState === ‘playing’ && renderOfficeView()}
+{gameState === ‘victory’ && renderVictory()}
+{gameState === ‘gameover’ && renderGameOver()}
+</div>
+);
+};
+
+export default FiveNightsAtRods;
